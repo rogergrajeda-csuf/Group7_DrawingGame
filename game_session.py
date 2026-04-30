@@ -46,16 +46,54 @@ class GameSession:
         self.brush_color = "#111827"
         self.brush_size = tk.IntVar(value=5)
 
+        # Timer state
+        self.timer_job = None
+        self.time_left = 30
+        self.timer_label = None
+        self.drawing_time_limit = 30
+        self.guess_time_limit = 30
+
         self.show_setup_screen()
+
+    # -----------------------
+    # TIMER HELPERS
+    # -----------------------
+
+    def cancel_timer(self):
+        if self.timer_job is not None:
+            self.root.after_cancel(self.timer_job)
+            self.timer_job = None
+
+    def start_timer(self, seconds, timeout_callback):
+        self.cancel_timer()
+        self.time_left = seconds
+
+        def update_timer():
+            if self.timer_label is not None:
+                self.timer_label.config(text=f"Time Left: {self.time_left}s")
+
+            if self.time_left <= 0:
+                self.cancel_timer()
+                timeout_callback()
+                return
+
+            self.time_left -= 1
+            self.timer_job = self.root.after(1000, update_timer)
+
+        update_timer()
 
     # -----------------------
     # UI HELPERS
     # -----------------------
 
     def clear_window(self):
+        self.cancel_timer()
+
         for widget in self.root.winfo_children():
             widget.destroy()
+
         self.root.configure(bg=self.bg)
+        self.timer_label = None
 
     def make_title(self, parent, title, subtitle=None):
         tk.Label(
@@ -100,7 +138,7 @@ class GameSession:
         else:
             bg = self.secondary
             fg = self.text
-            active_bg = "#DDE1FF"
+            active_bg = "#FBCFE8"
 
         button = tk.Button(
             parent,
@@ -123,7 +161,7 @@ class GameSession:
         return tk.Entry(
             parent,
             font=("Segoe UI", 12),
-            bg="#F9FAFB",
+            bg="#FFF7ED",
             fg=self.text,
             insertbackground=self.text,
             relief=tk.FLAT,
@@ -219,7 +257,7 @@ class GameSession:
 
         self.make_button(
             card,
-            "Start Game",
+            "Start Game ✨",
             self.start_game_setup,
             variant="primary",
             width=22
@@ -297,14 +335,14 @@ class GameSession:
 
         self.make_button(
             card,
-            "Start Round 1",
+            "Start Round 1 🎨",
             self.show_drawing_screen,
             variant="primary",
             width=22
         ).pack(pady=25)
 
     # -----------------------
-    # DRAWING SCREEN
+    # PROMPT SCREEN
     # -----------------------
 
     def show_drawing_screen(self):
@@ -320,8 +358,76 @@ class GameSession:
         self.make_title(
             self.root,
             f"Round {self.round_number}",
-            f"Drawer: {self.current_drawer.name} — Other players should look away."
+            f"Drawer: {self.current_drawer.name} — Enter the secret prompt first."
         )
+
+        prompt_card = self.make_card(self.root)
+        prompt_card.pack(pady=30, padx=260, fill="both", expand=False)
+
+        tk.Label(
+            prompt_card,
+            text="Secret Prompt",
+            font=("Segoe UI", 20, "bold"),
+            bg=self.card,
+            fg=self.text
+        ).pack(pady=(25, 5))
+
+        tk.Label(
+            prompt_card,
+            text="Only the drawer should look at this screen.",
+            font=("Segoe UI", 11),
+            bg=self.card,
+            fg=self.danger
+        ).pack(pady=(0, 20))
+
+        form = tk.Frame(prompt_card, bg=self.card)
+        form.pack(padx=28, pady=5)
+
+        self.make_label(form, "Hint / Description:", bg=self.card).pack(anchor="w", pady=(0, 5))
+        self.description_entry = self.make_entry(form)
+        self.description_entry.pack(ipady=7, pady=(0, 14))
+
+        self.make_label(form, "Keyword / Answer:", bg=self.card).pack(anchor="w", pady=(0, 5))
+
+        # Keyword is NOT hidden while drawer types it
+        self.keyword_entry = self.make_entry(form)
+        self.keyword_entry.pack(ipady=7, pady=(0, 18))
+
+        self.make_button(
+            prompt_card,
+            "Continue to Drawing 🎨",
+            self.submit_prompt_and_start_drawing,
+            variant="primary",
+            width=24
+        ).pack(pady=(8, 25))
+
+    def submit_prompt_and_start_drawing(self):
+        description = self.description_entry.get()
+        keyword = self.keyword_entry.get()
+
+        try:
+            self.current_prompt.set_prompt(description, keyword)
+        except ValueError as error:
+            messagebox.showerror("Invalid Prompt", str(error))
+            return
+
+        self.show_actual_drawing_screen()
+
+    # -----------------------
+    # DRAWING SCREEN
+    # -----------------------
+
+    def show_actual_drawing_screen(self):
+        self.clear_window()
+
+        self.timer_label = tk.Label(
+            self.root,
+            text="Time Left: 30s",
+            font=("Segoe UI", 16, "bold"),
+            bg=self.bg,
+            fg=self.danger
+        )
+        self.timer_label.pack(pady=(0, 8))
 
         main = tk.Frame(self.root, bg=self.bg)
         main.pack(pady=8)
@@ -332,9 +438,9 @@ class GameSession:
         tk.Label(
             canvas_card,
             text="Drawing Canvas",
-            font=("Segoe UI", 16, "bold"),
+            font=("Segoe UI", 14, "bold"),
             bg=self.card,
-            fg=self.text
+            fg=self.accent
         ).pack(pady=(15, 8))
 
         self.canvas = tk.Canvas(
@@ -355,7 +461,13 @@ class GameSession:
         controls = tk.Frame(canvas_card, bg=self.card)
         controls.pack(pady=(0, 18))
 
-        self.make_button(controls, "Color", self.choose_color, variant="secondary", width=10).grid(row=0, column=0, padx=6)
+        self.make_button(
+            controls,
+            "Color",
+            self.choose_color,
+            variant="secondary",
+            width=10
+        ).grid(row=0, column=0, padx=6)
 
         tk.Label(
             controls,
@@ -377,53 +489,43 @@ class GameSession:
             highlightthickness=0
         ).grid(row=0, column=2)
 
-        self.make_button(controls, "Clear", self.clear_drawing, variant="danger", width=10).grid(row=0, column=3, padx=8)
-
-        prompt_card = self.make_card(main)
-        prompt_card.grid(row=0, column=1, padx=18, pady=8, sticky="n")
-
-        tk.Label(
-            prompt_card,
-            text="Secret Prompt",
-            font=("Segoe UI", 18, "bold"),
-            bg=self.card,
-            fg=self.text
-        ).pack(pady=(22, 5))
-
-        tk.Label(
-            prompt_card,
-            text="Only the drawer should fill this out.",
-            font=("Segoe UI", 10),
-            bg=self.card,
-            fg=self.danger
-        ).pack(pady=(0, 18))
-
-        form = tk.Frame(prompt_card, bg=self.card)
-        form.pack(padx=28, pady=5)
-
-        self.make_label(form, "Drawing Description:", bg=self.card).pack(anchor="w", pady=(0, 5))
-        self.description_entry = self.make_entry(form)
-        self.description_entry.pack(ipady=7, pady=(0, 14))
-
-        self.make_label(form, "Keyword / Answer:", bg=self.card).pack(anchor="w", pady=(0, 5))
-        self.keyword_entry = self.make_entry(form)
-        self.keyword_entry.pack(ipady=7, pady=(0, 18))
+        self.make_button(
+            controls,
+            "Clear",
+            self.clear_drawing,
+            variant="danger",
+            width=10
+        ).grid(row=0, column=3, padx=8)
 
         self.make_button(
-            prompt_card,
-            "Save Prompt & Start Guessing",
-            self.submit_prompt_and_start_guessing,
+            self.root,
+            "Finish Drawing & Start Guessing",
+            self.finish_drawing_and_start_guessing,
             variant="primary",
-            width=26
-        ).pack(pady=(8, 12))
+            width=30
+        ).pack(pady=12)
 
-        self.make_button(
-            prompt_card,
-            "View Scoreboard",
-            self.show_scoreboard_popup,
-            variant="secondary",
-            width=20
-        ).pack(pady=(0, 25))
+        self.start_timer(self.drawing_time_limit, self.drawing_time_expired)
+
+    def finish_drawing_and_start_guessing(self):
+        self.cancel_timer()
+
+        self.guessers = [
+            player for player in self.players
+            if player != self.current_drawer
+        ]
+
+        self.current_guesser_index = 0
+        self.show_guessing_screen()
+
+    def drawing_time_expired(self):
+        self.guessers = [
+            player for player in self.players
+            if player != self.current_drawer
+        ]
+
+        self.current_guesser_index = 0
+        self.show_guessing_screen(message="Drawing time is up! Guessing begins now.")
 
     def start_draw(self, event):
         self.last_x = event.x
@@ -464,35 +566,6 @@ class GameSession:
         self.canvas.delete("all")
         self.drawing_lines = []
 
-    def submit_prompt_and_start_guessing(self):
-        description = self.description_entry.get()
-        keyword = self.keyword_entry.get()
-
-        if len(self.drawing_lines) == 0:
-            confirm = messagebox.askyesno(
-                "No Drawing",
-                "You have not drawn anything yet. Continue anyway?"
-            )
-
-            if not confirm:
-                return
-
-        try:
-            self.current_prompt.set_prompt(description, keyword)
-        except ValueError as error:
-            messagebox.showerror("Invalid Prompt", str(error))
-            return
-
-        messagebox.showinfo(
-            "Prompt Saved",
-            "Prompt saved. Pass the device to the guessers."
-        )
-
-        self.guessers = [player for player in self.players if player != self.current_drawer]
-        self.current_guesser_index = 0
-
-        self.show_guessing_screen()
-
     # -----------------------
     # GUESSING SCREEN
     # -----------------------
@@ -503,7 +576,7 @@ class GameSession:
         self.make_title(
             self.root,
             "Guessing Phase",
-            "Each guesser gets one chance."
+            "Each guesser gets 30 seconds and one chance."
         )
 
         if message:
@@ -514,6 +587,15 @@ class GameSession:
                 bg=self.bg,
                 fg=self.danger
             ).pack(pady=(0, 8))
+
+        self.timer_label = tk.Label(
+            self.root,
+            text="Time Left: 30s",
+            font=("Segoe UI", 16, "bold"),
+            bg=self.bg,
+            fg=self.danger
+        )
+        self.timer_label.pack(pady=(0, 8))
 
         main = tk.Frame(self.root, bg=self.bg)
         main.pack(pady=8)
@@ -537,12 +619,14 @@ class GameSession:
             highlightbackground=self.border,
             highlightthickness=2
         )
-        drawing_canvas.pack(padx=20, pady=(0, 20))
+        drawing_canvas.pack(padx=20, pady=(0, 10))
 
         self.redraw_canvas(drawing_canvas)
+
+        # Shows description/hint when passing to guessers
         tk.Label(
             drawing_card,
-            text=f"Prompt: {self.current_prompt.description}",
+            text=f"Hint: {self.current_prompt.description}",
             font=("Segoe UI", 13, "bold"),
             bg=self.card,
             fg=self.accent
@@ -575,7 +659,7 @@ class GameSession:
 
         self.make_button(
             guess_card,
-            "Submit Guess",
+            "Submit Guess 💭",
             self.submit_guess,
             variant="primary",
             width=22
@@ -588,6 +672,8 @@ class GameSession:
             variant="secondary",
             width=20
         ).pack(pady=(0, 25))
+
+        self.start_timer(self.guess_time_limit, self.guess_time_expired)
 
     def redraw_canvas(self, canvas):
         for x1, y1, x2, y2, color, width in self.drawing_lines:
@@ -603,11 +689,14 @@ class GameSession:
             )
 
     def submit_guess(self):
+        self.cancel_timer()
+
         current_guesser = self.guessers[self.current_guesser_index]
         guess = self.guess_entry.get().strip()
 
         if guess == "":
             messagebox.showerror("Invalid Guess", "Guess cannot be blank.")
+            self.start_timer(self.guess_time_limit, self.guess_time_expired)
             return
 
         if self.current_prompt.check_guess(guess):
@@ -628,11 +717,20 @@ class GameSession:
         else:
             self.show_guessing_screen(message="Incorrect guess. Next player may guess.")
 
+    def guess_time_expired(self):
+        self.current_guesser_index += 1
+
+        if self.current_guesser_index >= len(self.guessers):
+            self.show_round_results(correct_player=None)
+        else:
+            self.show_guessing_screen(message="Time is up! Next player may guess.")
+
     # -----------------------
     # RESULTS / WINNER
     # -----------------------
 
     def show_round_results(self, correct_player):
+        self.cancel_timer()
         self.clear_window()
 
         self.make_title(self.root, "Round Results")
@@ -670,7 +768,7 @@ class GameSession:
         if winner:
             self.make_button(
                 card,
-                "Show Winner",
+                "Show Winner 🏆",
                 lambda: self.show_winner_screen(winner),
                 variant="success",
                 width=20
@@ -678,13 +776,14 @@ class GameSession:
         else:
             self.make_button(
                 card,
-                "Next Round",
+                "Next Round 🎨",
                 self.prepare_next_round,
                 variant="primary",
                 width=20
             ).pack(pady=24)
 
     def prepare_next_round(self):
+        self.cancel_timer()
         self.turn_manager.move_to_next_drawer()
         self.round_number += 1
         self.show_drawing_screen()
@@ -708,14 +807,14 @@ class GameSession:
         ).pack(pady=(0, 8))
 
         for player in self.players:
-            row = tk.Frame(scoreboard, bg="#F9FAFB", highlightbackground=self.border, highlightthickness=1)
+            row = tk.Frame(scoreboard, bg="#FFF7ED", highlightbackground=self.border, highlightthickness=1)
             row.pack(fill="x", padx=20, pady=4)
 
             tk.Label(
                 row,
                 text=player.name,
                 font=("Segoe UI", 12, "bold"),
-                bg="#F9FAFB",
+                bg="#FFF7ED",
                 fg=self.text,
                 width=18,
                 anchor="w"
@@ -725,7 +824,7 @@ class GameSession:
                 row,
                 text=f"{player.score} point(s)",
                 font=("Segoe UI", 12),
-                bg="#F9FAFB",
+                bg="#FFF7ED",
                 fg=self.primary,
                 width=12,
                 anchor="e"
@@ -740,6 +839,7 @@ class GameSession:
         messagebox.showinfo("Scoreboard", scores)
 
     def show_winner_screen(self, winner):
+        self.cancel_timer()
         self.clear_window()
 
         self.make_title(
@@ -782,7 +882,7 @@ class GameSession:
 
         self.make_button(
             buttons,
-            "Play Again",
+            "Play Again ✨",
             self.show_setup_screen,
             variant="primary",
             width=16
